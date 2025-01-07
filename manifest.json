@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ScrappySM/CarbonLauncher/refs/heads/main/schema.json",
+
+  "name": "ScrappyTemplate"
+  "url": "https://github.com/ScrappySM/ScrappyTemplate",
+
+  "authors": [
+    "BenMcAvoy"
+  ],
+
+  "description": "A template for creating mods for Scrap Mechanic."
+}
