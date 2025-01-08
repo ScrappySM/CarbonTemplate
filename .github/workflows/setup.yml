@@ -1,0 +1,59 @@
+name: Setup project
+
+on:
+  push:
+    branches:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure it's the initial commit
+        id: check_commit
+        run: |
+          # If commit message doesn't contain "Initial", set output to false
+          if [[ ! "${{ github.event.head_commit.message }}" =~ "Initial" ]]; then
+            echo "Commit message does not contain 'Initial'. Skipping further steps."
+            echo "skip=true" >> $GITHUB_ENV  # Set environment variable to skip further steps
+          fi
+
+      - name: Rename files
+        if: env.skip != 'true'
+        run: |
+          REPO_NAME=$(basename ${GITHUB_REPOSITORY})
+          mv CarbonTemplate/CarbonTemplate.vcxproj CarbonTemplate/${REPO_NAME}.vcxproj
+          mv CarbonTemplate $REPO_NAME
+          mv CarbonTemplate.sln $REPO_NAME.sln
+
+      - name: Find and replace
+        if: env.skip != 'true'
+        run: |
+          REPO_NAME=$(basename ${GITHUB_REPOSITORY})
+          sed -i "s/CarbonTemplate/${REPO_NAME}/g" $REPO_NAME/${REPO_NAME}.vcxproj
+          sed -i "s/CarbonTemplate/${REPO_NAME}/g" $REPO_NAME.sln
+          sed -i "s/CarbonTemplate/${REPO_NAME}/g" DebugInjector/DebugInjector.vcxproj
+
+      - name: Delete this workflow
+        if: env.skip != 'true'
+        run: |
+          rm .github/workflows/setup.yml
+
+      - name: Commit changes
+        if: env.skip != 'true'
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add -A
+          git commit --amend --no-edit
+          git push --force
