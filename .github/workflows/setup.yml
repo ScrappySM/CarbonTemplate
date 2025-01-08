@@ -40,9 +40,23 @@ jobs:
         if: env.skip != 'true'
         run: |
           REPO_NAME=$(basename ${GITHUB_REPOSITORY})
+          REPO_OWNER=$(echo ${GITHUB_REPOSITORY} | cut -d '/' -f 1)
           sed -i "s/CarbonTemplate/${REPO_NAME}/g" $REPO_NAME/${REPO_NAME}.vcxproj
           sed -i "s/CarbonTemplate/${REPO_NAME}/g" $REPO_NAME.sln
           sed -i "s/CarbonTemplate/${REPO_NAME}/g" DebugInjector/DebugInjector.vcxproj
+          sed -i "s/REPONAME/${REPO_NAME}/g" manifest.json
+          sed -i "s/REPOOWNER/${REPO_OWNER}/g" manifest.json
+          sed -i "s/REPOOWNER/${REPO_OWNER}/g" manifest.json
+          sed -i "s/CarbonTemplate/${REPO_NAME}/g" README.new.md
+          sed -i "s/BenMcAvoy, ScrappySM/${REPO_OWNER}/g" LICENSE
+          sed -i "s|REPOLINK|https://github.com/${GITHUB_REPOSITORY}|g" manifest.json
+          sed -i "s|RELEASES_LINK_URL|https://github.com/${GITHUB_REPOSITORY}/releases|g" README.new.md
+
+      - name: Update README to getting started
+        if: env.skip != 'true'
+        run: |
+          rm README.md
+          mv README.new.md README.md
 
       - name: Delete this workflow
         if: env.skip != 'true'

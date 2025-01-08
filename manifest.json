@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/ScrappySM/CarbonLauncher/refs/heads/main/schema.json",
 
-  "name": "ScrappyTemplate"
-  "url": "https://github.com/ScrappySM/ScrappyTemplate",
+  "name": "REPONAME",
+  "url": "REPOLINK",
 
   "authors": [
-    "BenMcAvoy"
+    "REPOOWNER"
   ],
 
-  "description": "A template for creating mods for Scrap Mechanic."
+  "description": "No description yet, needs to be filled in"
 }
