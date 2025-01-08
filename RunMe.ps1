@@ -48,6 +48,9 @@ function Replace-TextInFile {
 Replace-TextInFile "$sourceDirectory\$project.sln" "CarbonTemplate" $project
 Replace-TextInFile "$sourceDirectory\$project\$project.vcxproj" "CarbonTemplate" $project
 
+# Update the reference that 1-DebugInjector has
+Replace-TextInFile "$sourceDirectory\1-DebugInjector\1-DebugInjector.vcxproj" "CarbonTemplate" $project
+
 # Prompt to remove the RunMe.ps1 script
 $input = Read-Host -Prompt "Do you want to remove the RunMe.ps1 script? (it's no longer needed) (Y/N)"
 if ($input -eq "Y") {
