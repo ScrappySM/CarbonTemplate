@@ -4,6 +4,7 @@
 #include <TlHelp32.h>
 
 #include <filesystem>
+#include <shellapi.h>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -12,79 +13,11 @@
 
 static const char* targetProcess = "ScrapMechanic.exe";
 
-static std::string GetModuleDir() {
-	char szPath[MAX_PATH];
-	GetModuleFileNameA(nullptr, szPath, MAX_PATH);
-	std::string path(szPath);
-	return path.substr(0, path.find_last_of("\\/"));
-}
-
-static bool IsProcessRunning(const std::string& processName) {
-	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if (hSnapshot == INVALID_HANDLE_VALUE) {
-		return false;
-	}
-
-	PROCESSENTRY32 pe32;
-	pe32.dwSize = sizeof(PROCESSENTRY32);
-
-	if (!Process32First(hSnapshot, &pe32)) {
-		CloseHandle(hSnapshot);
-		return false;
-	}
-
-	do {
-		if (std::string(pe32.szExeFile) == processName) {
-			CloseHandle(hSnapshot);
-			return true;
-		}
-	} while (Process32Next(hSnapshot, &pe32));
-
-	CloseHandle(hSnapshot);
-	return false;
-}
-
-static bool IsModuleInjected(HANDLE hProcess, const std::string& moduleName) {
-	MODULEENTRY32 me32;
-	me32.dwSize = sizeof(MODULEENTRY32);
-	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetProcessId(hProcess));
-	if (hSnapshot == INVALID_HANDLE_VALUE) {
-		return false;
-	}
-	if (!Module32First(hSnapshot, &me32)) {
-		CloseHandle(hSnapshot);
-		return false;
-	}
-	do {
-		if (std::string(me32.szModule) == moduleName) {
-			CloseHandle(hSnapshot);
-			return true;
-		}
-	} while (Module32Next(hSnapshot, &me32));
-	CloseHandle(hSnapshot);
-	return false;
-}
-
-HANDLE GetProcessHandle(const std::string& processName) {
-	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if (hSnapshot == INVALID_HANDLE_VALUE) {
-		return nullptr;
-	}
-	PROCESSENTRY32 pe32;
-	pe32.dwSize = sizeof(PROCESSENTRY32);
-	if (!Process32First(hSnapshot, &pe32)) {
-		CloseHandle(hSnapshot);
-		return nullptr;
-	}
-	do {
-		if (std::string(pe32.szExeFile) == processName) {
-			CloseHandle(hSnapshot);
-			return OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
-		}
-	} while (Process32Next(hSnapshot, &pe32));
-	CloseHandle(hSnapshot);
-	return nullptr;
-}
+// Forward declaration of helper functions
+static std::string GetModuleDir();
+static bool IsProcessRunning(const std::string& processName);
+static bool IsModuleInjected(HANDLE hProcess, const std::string& moduleName);
+static HANDLE GetProcessHandle(const std::string& processName);
 
 int main(void) {
 	std::string path = GetModuleDir();
@@ -92,22 +25,39 @@ int main(void) {
 	// Look for .dll files in the CWD and copy them to the temp directory
 	std::vector<std::string> dlls = {};
 
+	std::string tempPath = path + "\\temp";
+	CreateDirectoryA(tempPath.c_str(), nullptr);
+
 	for (auto& file : std::filesystem::directory_iterator(path)) {
 		if (file.path().extension() == ".dll") {
 			dlls.emplace_back(file.path().string());
 		}
 	}
 
-	std::string tempPath = path + "\\temp";
-	CreateDirectoryA(tempPath.c_str(), nullptr);
-
 	for (const auto& dll : dlls) {
 		std::string dest = tempPath + "\\" + std::filesystem::path(dll).filename().string();
-		CopyFileA(dll.c_str(), dest.c_str(), FALSE);
 	}
 
 	bool hadToWait = false;
 	while (!IsProcessRunning(targetProcess)) {
+		static bool hasAsked = false;
+		if (!hasAsked) {
+			std::cout << "Start Scrap Mechanic? (Y/n) " << std::endl;
+
+			std::string input;
+			std::getline(std::cin, input);
+
+			std::transform(input.begin(), input.end(), input.begin(), ::tolower);
+
+			char firstChar = input.empty() ? 'y' : input[0];
+
+			if (firstChar == 'y') {
+				ShellExecuteA(nullptr, "open", "steam://rungameid/387990", nullptr, nullptr, SW_SHOWNORMAL);
+			}
+
+			hasAsked = true;
+		}
+
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		std::cout << "Waiting for " << targetProcess << " to start..." << std::endl;
 		hadToWait = true;
@@ -115,8 +65,9 @@ int main(void) {
 
 	// Wait a bit longer to make sure the process is fully loaded
 	// Just bit of safety
-	if (hadToWait)
+	if (hadToWait) {
 		std::this_thread::sleep_for(std::chrono::seconds(5));
+	}
 
 	HANDLE hProcess = GetProcessHandle(targetProcess);
 
@@ -198,4 +149,78 @@ int main(void) {
 	CloseHandle(hProcess);
 
 	return 0;
+}
+
+static std::string GetModuleDir() {
+	char szPath[MAX_PATH];
+	GetModuleFileNameA(nullptr, szPath, MAX_PATH);
+	std::string path(szPath);
+	return path.substr(0, path.find_last_of("\\/"));
+}
+
+static bool IsProcessRunning(const std::string& processName) {
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapshot == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+
+	PROCESSENTRY32 pe32;
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+
+	if (!Process32First(hSnapshot, &pe32)) {
+		CloseHandle(hSnapshot);
+		return false;
+	}
+
+	do {
+		if (std::string(pe32.szExeFile) == processName) {
+			CloseHandle(hSnapshot);
+			return true;
+		}
+	} while (Process32Next(hSnapshot, &pe32));
+
+	CloseHandle(hSnapshot);
+	return false;
+}
+
+static bool IsModuleInjected(HANDLE hProcess, const std::string& moduleName) {
+	MODULEENTRY32 me32;
+	me32.dwSize = sizeof(MODULEENTRY32);
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetProcessId(hProcess));
+	if (hSnapshot == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	if (!Module32First(hSnapshot, &me32)) {
+		CloseHandle(hSnapshot);
+		return false;
+	}
+	do {
+		if (std::string(me32.szModule) == moduleName) {
+			CloseHandle(hSnapshot);
+			return true;
+		}
+	} while (Module32Next(hSnapshot, &me32));
+	CloseHandle(hSnapshot);
+	return false;
+}
+
+static HANDLE GetProcessHandle(const std::string& processName) {
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapshot == INVALID_HANDLE_VALUE) {
+		return nullptr;
+	}
+	PROCESSENTRY32 pe32;
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+	if (!Process32First(hSnapshot, &pe32)) {
+		CloseHandle(hSnapshot);
+		return nullptr;
+	}
+	do {
+		if (std::string(pe32.szExeFile) == processName) {
+			CloseHandle(hSnapshot);
+			return OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
+		}
+	} while (Process32Next(hSnapshot, &pe32));
+	CloseHandle(hSnapshot);
+	return nullptr;
 }
