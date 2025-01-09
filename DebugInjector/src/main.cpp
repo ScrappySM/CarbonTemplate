@@ -18,6 +18,25 @@ static std::string GetModuleDir();
 static bool IsProcessRunning(const std::string& processName);
 static bool IsModuleInjected(HANDLE hProcess, const std::string& moduleName);
 static HANDLE GetProcessHandle(const std::string& processName);
+static void UninjectModule(HANDLE hProcess, const std::string& moduleName);
+static void InjectModule(HANDLE hProcess, const std::string& modulePath);
+
+void CopyDLLs() {
+	std::string path = GetModuleDir();
+	// Look for .dll files in the CWD and copy them to the temp directory
+	std::vector<std::string> dlls = {};
+	std::string tempPath = path + "\\temp";
+	CreateDirectoryA(tempPath.c_str(), nullptr);
+	for (auto& file : std::filesystem::directory_iterator(path)) {
+		if (file.path().extension() == ".dll") {
+			dlls.emplace_back(file.path().string());
+		}
+	}
+	for (const auto& dll : dlls) {
+		std::string dest = tempPath + "\\" + std::filesystem::path(dll).filename().string();
+		CopyFileA(dll.c_str(), dest.c_str(), FALSE);
+	}
+}
 
 int main(void) {
 	std::string path = GetModuleDir();
@@ -36,6 +55,7 @@ int main(void) {
 
 	for (const auto& dll : dlls) {
 		std::string dest = tempPath + "\\" + std::filesystem::path(dll).filename().string();
+		CopyFileA(dll.c_str(), dest.c_str(), FALSE);
 	}
 
 	bool hadToWait = false;
@@ -71,79 +91,21 @@ int main(void) {
 
 	HANDLE hProcess = GetProcessHandle(targetProcess);
 
-	// Inject the DLLs
-	for (const auto& dll : dlls) {
-		std::string dest = tempPath + "\\" + std::filesystem::path(dll).filename().string();
-
-		// Check if any of the DLLs are already injected
-		if (IsModuleInjected(hProcess, std::filesystem::path(dll).filename().string())) {
-			std::cerr << "DLL " << std::filesystem::path(dll).filename().string() << " is already injected" << std::endl;
-
-			// Get a handle to the DLL in the target process
-			HANDLE hModule = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetProcessId(hProcess));
-			MODULEENTRY32 me32 = { 0 };
-			me32.dwSize = sizeof(MODULEENTRY32);
-			Module32First(hModule, &me32);
-
-			do {
-				if (std::string(me32.szModule) == std::filesystem::path(dll).filename().string()) {
-					break;
-				}
-			} while (Module32Next(hModule, &me32));
-
-			CloseHandle(hModule);
-
-			// Unload the DLL
-			HMODULE hKernel = GetModuleHandleA("Kernel32");
-			if (hKernel == nullptr) {
-				std::cerr << "Failed to get the handle of Kernel32" << std::endl;
-				continue;
-			}
-
-			auto l_FreeLibraryA = GetProcAddress(hKernel, "FreeLibrary");
-			if (l_FreeLibraryA == nullptr) {
-				std::cerr << "Failed to get the address of FreeLibrary" << std::endl;
-				continue;
-			}
-
-			HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(l_FreeLibraryA), me32.modBaseAddr, 0, nullptr);
-
-			auto dllName = std::filesystem::path(dll).filename().string();
-			std::cout << "Detachment of " << dllName << " requested" << std::endl;
-			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+	for (auto& dll : dlls) {
+		std::string filename = std::filesystem::path(dll).filename().string();
+		if (IsModuleInjected(hProcess, filename)) {
+			std::cout << "Module " << dll << " is already injected" << std::endl;
+			UninjectModule(hProcess, filename);
+			std::this_thread::sleep_for(std::chrono::seconds(1));
 		}
+	}
 
-		LPVOID pLibRemote = VirtualAllocEx(hProcess, nullptr, dest.size() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	CopyDLLs();
 
-		if (pLibRemote == nullptr) {
-			std::cerr << "Failed to allocate memory in the target process" << std::endl;
-			continue;
-		}
-
-		WriteProcessMemory(hProcess, pLibRemote, dest.c_str(), dest.size() + 1, nullptr);
-
-		auto hKernel = GetModuleHandleA("Kernel32");
-		if (hKernel == nullptr) {
-			std::cerr << "Failed to get the handle of Kernel32" << std::endl;
-			continue;
-		}
-
-		auto l_LoadLibraryA = GetProcAddress(hKernel, "LoadLibraryA");
-		if (l_LoadLibraryA == nullptr) {
-			std::cerr << "Failed to get the address of LoadLibraryA" << std::endl;
-			continue;
-		}
-
-		HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(l_LoadLibraryA), pLibRemote, 0, nullptr);
-		if (hThread == nullptr) {
-			std::cerr << "Failed to create remote thread" << std::endl;
-			continue;
-		}
-		WaitForSingleObject(hThread, INFINITE);
-		CloseHandle(hThread);
-		VirtualFreeEx(hProcess, pLibRemote, 0, MEM_RELEASE);
-
-		std::cout << "Injected " << std::filesystem::path(dll).filename().string() << std::endl;
+	for (auto& dll : dlls) {
+		std::string filename = std::filesystem::path(dll).filename().string();
+		std::string tempPath = path + "\\temp\\" + filename;
+		InjectModule(hProcess, tempPath);
 	}
 
 	CloseHandle(hProcess);
@@ -223,4 +185,84 @@ static HANDLE GetProcessHandle(const std::string& processName) {
 	} while (Process32Next(hSnapshot, &pe32));
 	CloseHandle(hSnapshot);
 	return nullptr;
+}
+
+static void UninjectModule(HANDLE hProcess, const std::string& moduleName) {
+	MODULEENTRY32 me32 = { 0 };
+	me32.dwSize = sizeof(MODULEENTRY32);
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetProcessId(hProcess));
+
+	if (hSnapshot == INVALID_HANDLE_VALUE) {
+		return;
+	}
+
+	if (!Module32First(hSnapshot, &me32)) {
+		CloseHandle(hSnapshot);
+		return;
+	}
+
+	do {
+		if (std::string(me32.szModule) == moduleName) {
+			HANDLE hModule = me32.hModule;
+			CloseHandle(hSnapshot); // Close ref
+			//CloseHandle(hModule); // Close ref
+
+			LPVOID pFreeLibrary = GetProcAddress(GetModuleHandleA("Kernel32"), "FreeLibrary");
+			if (pFreeLibrary == nullptr) {
+				std::cout << "Failed to get address of FreeLibrary in target process" << std::endl;
+				CloseHandle(hSnapshot);
+				return;
+			}
+
+			HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pFreeLibrary), hModule, 0, nullptr);
+			if (hThread == nullptr) {
+				std::cout << "Failed to create remote thread in target process" << std::endl;
+				CloseHandle(hSnapshot);
+				return;
+			}
+
+			WaitForSingleObject(hThread, INFINITE);
+			CloseHandle(hThread);
+
+			return;
+		}
+	} while (Module32Next(hSnapshot, &me32));
+
+	CloseHandle(hSnapshot);
+}
+
+static void InjectModule(HANDLE hProcess, const std::string& modulePath) {
+	// Allocate memory in the target process for the module path
+	LPVOID pModulePath = VirtualAllocEx(hProcess, nullptr, modulePath.size() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if (pModulePath == nullptr) {
+		std::cout << "Failed to allocate memory in target process" << std::endl;
+		return;
+	}
+	// Write the module path to the target process
+	if (!WriteProcessMemory(hProcess, pModulePath, modulePath.c_str(), modulePath.size() + 1, nullptr)) {
+		std::cout << "Failed to write module path to target process" << std::endl;
+		VirtualFreeEx(hProcess, pModulePath, 0, MEM_RELEASE);
+		return;
+	}
+	// Get the address of LoadLibraryA in the target process
+	LPVOID pLoadLibraryA = GetProcAddress(GetModuleHandleA("Kernel32"), "LoadLibraryA");
+	if (pLoadLibraryA == nullptr) {
+		std::cout << "Failed to get address of LoadLibraryA in target process" << std::endl;
+		VirtualFreeEx(hProcess, pModulePath, 0, MEM_RELEASE);
+		return;
+	}
+	// Create a remote thread in the target process to load the module
+	HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pLoadLibraryA), pModulePath, 0, nullptr);
+	if (hThread == nullptr) {
+		std::cout << "Failed to create remote thread in target process" << std::endl;
+		VirtualFreeEx(hProcess, pModulePath, 0, MEM_RELEASE);
+		return;
+	}
+	// Wait for the thread to finish
+	WaitForSingleObject(hThread, INFINITE);
+	// Clean up
+	CloseHandle(hThread);
+	VirtualFreeEx(hProcess, pModulePath, 0, MEM_RELEASE);
+
+	std::cout << "Injected " << modulePath << " into " << targetProcess << std::endl;
 }

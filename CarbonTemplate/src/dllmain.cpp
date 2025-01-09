@@ -1,48 +1,26 @@
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <iostream>
 
-static HANDLE threadHandle = nullptr;
-static DWORD threadId = 0;
+#include "log.h"
 
-static DWORD WINAPI MainThread(LPVOID lpReserved) {
-    BOOL console = AllocConsole();
+// DllMain function which gets called when the DLL is loaded
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
+	// RAII object to handle console creation/destruction
+	// Simply having this line here will allow you to print to the games console
+	// Don't worry about it, but if you're interested feel free to look in `utils.h`
+	// for the implementation
+	Log_t logRAII;
 
-    std::cout << "Hello, World!" << std::endl;
+	if (dwReason == DLL_PROCESS_ATTACH) {
+		DisableThreadLibraryCalls(hModule);
+		std::cout << "DLL_PROCESS_ATTACH" << std::endl;
+		// Setup, hook, etc here
+	}
 
-    while (!GetAsyncKeyState(VK_END)) {
-        Sleep(100);
-    }
+	if (dwReason == DLL_PROCESS_DETACH) {
+		std::cout << "DLL_PROCESS_DETACH" << std::endl;
+		// Cleanup, unhooking, etc here
+	}
 
-    std::cout << "Goodbye, World!" << std::endl;
-
-    if (console) FreeConsole();
-
-    FreeLibraryAndExitThread(static_cast<HMODULE>(lpReserved), 0);
-    return 0;
-}
-
-BOOL WINAPI DllMain(
-    _In_ HINSTANCE hModule,
-    _In_ DWORD     fdwReason,
-    _In_ LPVOID    lpvReserved
-) {
-    if (fdwReason == DLL_PROCESS_ATTACH) {
-        std::cout << "DLL_PROCESS_ATTACH" << std::endl;
-        DisableThreadLibraryCalls(hModule);
-        threadHandle = CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(MainThread), hModule, 0, &threadId);
-    }
-
-    if (fdwReason == DLL_PROCESS_DETACH) {
-        std::cout << "DLL_PROCESS_DETACH" << std::endl;
-        if (threadHandle != nullptr) {
-            // Signal the thread to exit
-            PostThreadMessage(threadId, WM_QUIT, 0, 0);
-            // Wait for the thread to exit
-            WaitForSingleObject(threadHandle, INFINITE);
-            CloseHandle(threadHandle);
-        }
-    }
-
-    return TRUE;
+	return TRUE;
 }
